@@ -1,4 +1,5 @@
 import socket,select,pickle
+from utils import *
 
 class CubeSatClient:
     def __init__(self,name,hostname,port=10000,debug=True):
@@ -14,7 +15,7 @@ class CubeSatClient:
         self.hostname = hostname
         self.port = port
 
-        # Disable printing to stdout if not debug
+        # Disable printing to stdout if debug is off
         if not debug:
             sys.stdout = open(os.devnull, 'w')
 
@@ -22,7 +23,7 @@ class CubeSatClient:
         '''
         Blocking function call to establish a socket connection with master
         '''
-        # Master expects a connectino followed by a message containing this unit's name
+        # Master expects a connection followed by a message containing this unit's name
         self.sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print('Attempting to connect to master at %s'%self.hostname)
         self.sckt.connect((self.hostname,self.port))
@@ -45,10 +46,12 @@ class CubeSatClient:
                     quit()
                 else:
                     print('Recieved a message from master!')
+                    msg = pickle.loads(msg)
+                    print('Message type:',msg.msg_type)
+
 
     def __del__(self):
         self.sckt.close()
-
 
 if __name__ == '__main__':
     c = CubeSatClient('test','192.168.0.13')

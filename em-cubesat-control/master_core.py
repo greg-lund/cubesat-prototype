@@ -1,13 +1,6 @@
 import socket, select, pickle
 import sys, os
-
-class Unit:
-    def __init__(self,name,connection):
-        '''
-        Each unit should have a unique name (str) and a socket connection
-        '''
-        self.name = name
-        self.connection = connection
+from utils import *
 
 class Master:
     def __init__(self,num_units=1,hostname=socket.gethostname(),port=10000,debug=True):
@@ -21,6 +14,7 @@ class Master:
 
         # Setup server
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind((hostname,port))
         self.server.setblocking(False)
         self.server.listen(5)
@@ -53,13 +47,18 @@ class Master:
 
         print('Connected to all units!')
 
+    def send_msg(self,unit_idx,msg):
+        if unit_idx >= len(self.units):
+            print('unit_idx out of range')
+            return
+        self.units[unit_idx].conn.sendall(pickle.dumps(msg))
+
     def __del__(self):
         for u in self.units:
             u.conn.close()
         self.server.close()
 
-
-
 if __name__ == '__main__':
-    m = Master(num_units=2)
+    m = Master(num_units=1)
     m.connect_units()
+    m.send_msg(0,Msg('echo',None))
