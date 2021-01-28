@@ -1,0 +1,4 @@
+## Python requirements for cubesat controls ##
+socket
+pickle
+select
