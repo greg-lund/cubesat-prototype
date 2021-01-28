@@ -16,7 +16,6 @@ class Master:
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind((hostname,port))
-        self.server.setblocking(False)
         self.server.listen(5)
 
         # Store all of the socket connections
@@ -32,20 +31,17 @@ class Master:
 
             conns,_,_ = select.select([self.server],[],[])
             for s in conns:
-                # Skip already connected units
-                new = True
-                for u in self.units:
-                    if u.conn == conn: new = False
-                if not new: continue
+                # Only look at new connections
+                if s is self.server:
+                    # On connection we expect to get a message with our unit's name
+                    conn,addr = self.server.accept()
+                    data = conn.recv(1024)
+                    conn.setblocking(False)
+                    print('Connected to %s at %s'%(data.decode(),addr[0]))
+                    self.units.append(Unit(data.decode(),conn))
 
-                # On connection we expect to get a message with our unit's name
-                conn,addr = self.server.accept()
-                conn.setblocking(False)
-                data = conn.recv(1024)
-                print('Connected to %s at %s!'%(data.decode(),addr[0]))
-                self.units.append(Unit(data.decode(),conn))
-
-        print('Connected to all units!')
+        print('Connected to all units')
+        self.server.setblocking(False)
 
     def send_msg(self,unit_idx,msg):
         if unit_idx >= len(self.units):
@@ -59,6 +55,6 @@ class Master:
         self.server.close()
 
 if __name__ == '__main__':
-    m = Master(num_units=1)
+    m = Master(num_units=3)
     m.connect_units()
     m.send_msg(0,Msg('echo',None))
