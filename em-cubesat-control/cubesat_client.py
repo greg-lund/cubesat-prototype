@@ -1,4 +1,4 @@
-import socket,select,pickle,os
+import socket,select,pickle,os,time
 from utils import *
 import RPi.GPIO as GPIO
 
@@ -20,8 +20,12 @@ class CubeSatClient:
         if not debug:
             sys.stdout = open(os.devnull, 'w')
 
+        # PWM frequency
+        self.pwm_frequency = pwm_frequency
+
         # Setup GPIO
         self.em_pins = [(26,19),(13,6)]
+        self.active_pwm = {}
 
         GPIO.setmode(GPIO.BCM)
         for pins in self.em_pins:
@@ -30,18 +34,45 @@ class CubeSatClient:
             GPIO.output(pins[0],0)
             GPIO.output(pins[1],0)
 
-        # PWM frequency
-        self.pwm_frequency = pwm_frequency
+        #print('Testing GPIO...')
+        #self.test_gpio()
 
+    def test_gpio(self):
+        '''
+        Test GPIO pins. Note: this should only be done with em_pins connected to leds or some other small load.
+        Don't run this while the h-bridges and electromagnets are connected!
+        '''
+        for pins in self.em_pins:
+            for pin in pins:
+                p = GPIO.PWM(pin,self.pwm_frequency)
+                p.start(0)
+                for dc in range(1,101):
+                    p.ChangeDutyCycle(dc)
+                    time.sleep(0.01)
+                for dc in range(100,-1,-1):
+                    p.ChangeDutyCycle(dc)
+                    time.sleep(0.01)
+                p.stop()
+                GPIO.output(pin,0)
 
-    def connect_to_master(self):
+    def connect_to_master(self,connect_attempts=5,retry_time=1):
         '''
         Blocking function call to establish a socket connection with master
         '''
         # Master expects a connection followed by a message containing this unit's name
         self.sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print('Attempting to connect to master at %s'%self.master_hostname)
-        self.sckt.connect((self.master_hostname,self.port))
+        for i in range(connect_attempts):
+            try:
+                self.sckt.connect((self.master_hostname,self.port))
+            except socket.error:
+                if i == connect_attempts-1:
+                    print('Failed to connect after %d attempts, aborting!'%connect_attempts)
+                    quit()
+                print('Unable to connect to master. Retrying in %d seconds'%retry_time)
+                time.sleep(retry_time)
+            else:
+                break
         self.sckt.sendall(self.name.encode())
         self.sckt.setblocking(False)
         print('Connected!')
@@ -76,8 +107,9 @@ class CubeSatClient:
             pin = msg.data[0]
             intensity = msg.data[1]
             print('Message is gpio_pwm. Starting pwm on gpio %d at %f%% intensity.'%(pin,100*intensity))
-            p = GPIO.PWM(pin,self.pwm_frequency)
-            p.start(intensity*100)
+            self.active_pwm[pin] = GPIO.PWM(pin,self.pwm_frequency)
+            self.active_pwm[pin].start(100*intensity)
+            time.sleep(1)
         elif msg.msg_type == 'power_em':
             print('Message is power_em')
             em_idx = msg.data[0]
