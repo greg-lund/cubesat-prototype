@@ -25,17 +25,19 @@ class CubeSatClient:
 
         # Setup GPIO
         self.em_pins = [(26,19),(13,6)]
-        self.active_pwm = {}
+        self.em_pwm = []
 
+        # Use GPIO numbering scheme
         GPIO.setmode(GPIO.BCM)
         for pins in self.em_pins:
+            # Setup output pins
             GPIO.setup(pins[0],GPIO.OUT)
             GPIO.setup(pins[1],GPIO.OUT)
             GPIO.output(pins[0],0)
             GPIO.output(pins[1],0)
 
-        #print('Testing GPIO...')
-        #self.test_gpio()
+            # Create PWM instances for our output pins
+            self.em_pwm.append((GPIO.PWM(pins[0],self.pwm_frequency),GPIO.PWM(pins[1],self.pwm_frequency)))
 
     def test_gpio(self):
         '''
@@ -107,13 +109,24 @@ class CubeSatClient:
             pin = msg.data[0]
             intensity = msg.data[1]
             print('Message is gpio_pwm. Starting pwm on gpio %d at %f%% intensity.'%(pin,100*intensity))
-            self.active_pwm[pin] = GPIO.PWM(pin,self.pwm_frequency)
-            self.active_pwm[pin].start(100*intensity)
-            time.sleep(1)
         elif msg.msg_type == 'power_em':
             print('Message is power_em')
             em_idx = msg.data[0]
             intensity = msg.data[1]
+            if em_idx > len(self.em_pwm):
+                print('ERROR: em_idx in msg is greater than number of active ems')
+                return
+            if intensity < -1 or intensity > 1:
+                print('ERROR: intensity in msg is out of range [-1,1]')
+                return
+            in1 = self.em_pwm[em_idx][0]
+            in2 = self.em_pwm[em_idx][1]
+            if intensity <= 0:
+                in1.start(100)
+                in2.start(100*(1+intensity))
+            else:
+                in2.start(100);
+                in1.start(100*(1-intensity))
 
     def __del__(self):
         self.sckt.close()
