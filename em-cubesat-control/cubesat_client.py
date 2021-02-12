@@ -1,6 +1,7 @@
 import socket,select,pickle,os,time
 from utils import *
 import RPi.GPIO as GPIO
+import board,busio,adafruit_vl6180x
 
 class CubeSatClient:
     def __init__(self,master_hostname,port=10000,pwm_frequency=500,debug=True):
@@ -23,8 +24,19 @@ class CubeSatClient:
         # PWM frequency
         self.pwm_frequency = pwm_frequency
 
-        # Setup GPIO
+        # Setup em GPIO
         self.em_pins = [(26,19),(13,6)]
+        self.setup_ems()
+
+        # Setup sensors
+        self.sensor_shutdown_pins = [4,17,27,22]
+        self.connect_sensors()
+
+    def setup_ems(self):
+        '''
+        Setup em gpio pins for pwm
+        '''
+        # Store pwm instances
         self.em_pwm = []
 
         # Use GPIO numbering scheme
@@ -38,6 +50,31 @@ class CubeSatClient:
 
             # Create PWM instances for our output pins
             self.em_pwm.append((GPIO.PWM(pins[0],self.pwm_frequency),GPIO.PWM(pins[1],self.pwm_frequency)))
+
+    def connect_sensors(self):
+        '''
+        Attempt to connect to all available ToF sensors
+        '''
+        # Initialize i2c interface
+        self.i2c = busio.I2C(board.SCL,board.SDA)
+        # Store sensor instances
+        self.sensors = []
+
+        # Disable all sensors
+        for pin in self.sensor_shutdown_pins:
+            GPIO.setup(pin,GPIO.OUT)
+            GPIO.output(pin,0)
+
+        # Enable a single sensor at a time and connect
+        addr = 20
+        for pin in self.sensor_shutdown_pins:
+            GPIO.output(pin,1)
+            if 0x29 in self.i2c.scan():
+                s = adafruit_vl6180x.VL6180X(self.i2c,0x29)
+                s._write_8(0x0212,addr)
+                del s
+                self.sensors.append(adafruit_vl6180x.VL6180X(self.i2c,addr))
+                addr+=1
 
     def test_gpio(self):
         '''
@@ -127,6 +164,9 @@ class CubeSatClient:
             else:
                 in2.start(100);
                 in1.start(100*(1-intensity))
+        elif msg.msg_type == 'run_rotation':
+            print('Message is run_rotation')
+
 
     def __del__(self):
         self.sckt.close()

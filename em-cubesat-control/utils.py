@@ -5,13 +5,11 @@ class Msg:
     def __init__(self,msg_type='echo',data=[]):
         '''
         ---------------------------------------------
-        Overview of message types:
-        ---------------------------------------------
         echo: a message used to test socket connection
             - data should be a string
             - client should simply echo data back to master
         gpio_pwm: a message used to test pwm on a specific gpio pin (BCM-based indexing)
-            - data should be a tupe (or list): (gpio_pin,intensity)
+            - data should be a tuple (or list): (gpio_pin,intensity)
                 - gpio_pin should be a non-reserved, available pin and intensity float in range [0,1]
         power_em: a message to power a specific em with a specific intensity
             - data should be a tuple (or list): (em_id,intensity)
