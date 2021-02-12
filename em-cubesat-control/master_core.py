@@ -1,4 +1,4 @@
-import socket, select, pickle
+import socket, select, pickle, time
 import sys, os
 from utils import *
 
@@ -48,6 +48,44 @@ class Master:
             print('unit_idx out of range')
             return
         self.units[unit_idx].conn.sendall(pickle.dumps(msg))
+
+    def get_sensor_data(self,unit_idx,num_samples=1,rate=1):
+        self.send_msg(unit_idx,Msg('read_sensor',(num_samples,rate)))
+        samples = 0
+        while samples < num_samples:
+            try:
+                msg = self.units[unit_idx].conn.recv(1024)
+            except BlockingIOError:
+                pass
+            else:
+                samples += 1
+                if len(msg) == 0:
+                    print('Client has shut down unexpectedly!')
+                    return
+                else:
+                    msg = pickle.loads(msg)
+                    print('Recieved data:',msg)
+
+    def run_2_cube_test(self,t_repel,t_coast,t_attract,recv_buffer=0.25):
+        total_time = t_repel+t_coast+t_attract
+        data1 = []
+        self.send_msg(0,Msg('run_rotation',[(0,1,t_repel),(0,0,t_coast),(1,1,t_attract)]))
+        t0 = time.time()
+        t = 0
+        while t < total_time + recv_buffer:
+            try:
+                msg = self.units[0].conn.recv(1024)
+            except BlockingIOError:
+                pass
+            else:
+                if len(msg) == 0:
+                    print('Client has shut down unexpectedly!')
+                    return
+                else:
+                    data1.append(pickle.loads(msg))
+            t = time.time() - t0
+
+        return data1
 
     def __del__(self):
         for u in self.units:
