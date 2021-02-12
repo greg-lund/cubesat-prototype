@@ -1,10 +1,10 @@
-import socket,select,pickle,os,time
+import socket,select,pickle,os,time,sys
 from utils import *
 import RPi.GPIO as GPIO
 import board,busio,adafruit_vl6180x
 
 class CubeSatClient:
-    def __init__(self,master_hostname,port=10000,pwm_frequency=500,debug=True):
+    def __init__(self,master_hostname,port=10000,pwm_frequency=1000,debug=True):
         '''
         CubesatClient allows for communication with the master control and for actuation on the rpi zero
 
@@ -30,7 +30,10 @@ class CubeSatClient:
 
         # Setup sensors
         self.sensor_shutdown_pins = [4,17,27,22]
+        self.sensors = []
         self.connect_sensors()
+
+        print('Connected to %d sensors!'%len(self.sensors))
 
     def setup_ems(self):
         '''
@@ -57,8 +60,6 @@ class CubeSatClient:
         '''
         # Initialize i2c interface
         self.i2c = busio.I2C(board.SCL,board.SDA)
-        # Store sensor instances
-        self.sensors = []
 
         # Disable all sensors
         for pin in self.sensor_shutdown_pins:
@@ -74,6 +75,11 @@ class CubeSatClient:
                 s._write_8(0x0212,addr)
                 del s
                 self.sensors.append(adafruit_vl6180x.VL6180X(self.i2c,addr))
+                # Change some registers to get higher sample rate
+                self.sensors[-1]._write_8(0x01B, 0x00) # SYSRANGE_INTRAMEASUREMENT_PERIOD = 10ms
+                self.sensors[-1]._write_8(0x01C, 0x05) # SYSRANGE_MAX_CONVERGENCE_TIME = 5ms
+                self.sensors[-1]._write_8(0x10A, 0x18) # READOUT_AVERAGE_SAMPLE_PERIOD = 2.65ms
+
                 addr+=1
 
     def test_gpio(self):
@@ -136,36 +142,107 @@ class CubeSatClient:
 
 
     def act_msg(self,msg):
+        '''
+        Act on incoming message from master
+        '''
+
         if msg is None:
             print("Message is None!")
             return
+
         if msg.msg_type == 'echo':
             print('Message is echo, echoing back to master...')
             self.sckt.sendall(msg.data.encode())
+
         elif msg.msg_type == 'gpio_pwm':
             pin = msg.data[0]
             intensity = msg.data[1]
             print('Message is gpio_pwm. Starting pwm on gpio %d at %f%% intensity.'%(pin,100*intensity))
+
         elif msg.msg_type == 'power_em':
             print('Message is power_em')
+
             em_idx = msg.data[0]
             intensity = msg.data[1]
-            if em_idx > len(self.em_pwm):
-                print('ERROR: em_idx in msg is greater than number of active ems')
-                return
-            if intensity < -1 or intensity > 1:
-                print('ERROR: intensity in msg is out of range [-1,1]')
-                return
-            in1 = self.em_pwm[em_idx][0]
-            in2 = self.em_pwm[em_idx][1]
-            if intensity <= 0:
-                in1.start(100)
-                in2.start(100*(1+intensity))
+
+            self.power_em(em_idx,intensity)
+
+        elif msg.msg_type == 'read_sensor':
+            print('Message is read sensor')
+
+            # If no msg data included, just send one sensor reading
+            if msg.data is None or len(msg.data) == 0:
+                reading = self.get_sensor_reading()
+                reading.insert(0,0) # Set time to zero
+                self.sckt.sendall(pickle.dumps(reading))
             else:
-                in2.start(100);
-                in1.start(100*(1-intensity))
+                num_samples = msg.data[0]
+                dt = 1.0/msg.data[1]
+                t0 = time.time()
+                for _ in range(num_samples):
+                    s = time.time()
+                    t = s - t0
+                    reading = self.get_sensor_reading()
+                    reading.insert(0,t)
+                    self.sckt.sendall(pickle.dumps(reading))
+                    leftover = dt - (time.time()-s)
+                    if leftover > 0:
+                        time.sleep(leftover)
+
         elif msg.msg_type == 'run_rotation':
             print('Message is run_rotation')
+
+            sensor_data = []
+            t_start = time.time()
+            for data in msg.data:
+                em_idx = data[0]
+                intensity = data[1]
+                duration = data[2]
+
+                self.power_em(em_idx,intensity)
+                t0 = time.time()
+                t = 0
+
+                while t < duration:
+                    reading = self.get_sensor_reading()
+                    reading.insert(0,time.time()-t_start)
+                    sensor_data.append(reading)
+                    self.sckt.sendall(pickle.dumps(reading))
+                    t = time.time()-t0
+
+                self.power_em(em_idx,0)
+            print('Got %d sensor measurements during rotation'%len(sensor_data))
+
+    def get_sensor_reading(self):
+        '''
+        Return a list with each sensor reading
+        '''
+        reading = []
+        for s in self.sensors:
+            reading.append(s.range)
+        return reading
+
+    def power_em(self,em_idx,intensity):
+        '''
+        Power em_idx with given intensity
+        '''
+
+        if em_idx > len(self.em_pwm):
+            print('ERROR: em_idx in msg is greater than number of active ems')
+            return
+        if intensity < -1 or intensity > 1:
+            print('ERROR: intensity in msg is out of range [-1,1]')
+            return
+
+        in1 = self.em_pwm[em_idx][0]
+        in2 = self.em_pwm[em_idx][1]
+
+        if intensity <= 0:
+            in1.start(100)
+            in2.start(100*(1+intensity))
+        else:
+            in2.start(100);
+            in1.start(100*(1-intensity))
 
 
     def __del__(self):
@@ -173,6 +250,9 @@ class CubeSatClient:
         GPIO.cleanup()
 
 if __name__ == '__main__':
-    c = CubeSatClient(master_hostname='192.168.0.13')
+    if len(sys.argv) != 2:
+        print('Usage: %s <master_hostname>'%sys.argv[0])
+        quit()
+    c = CubeSatClient(master_hostname=sys.argv[1])
     c.connect_to_master()
     c.run()
