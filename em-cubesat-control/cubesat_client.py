@@ -160,31 +160,45 @@ class CubeSatClient:
             em_idx = msg.data[0]
             intensity = msg.data[1]
 
-            if em_idx > len(self.em_pwm):
-                print('ERROR: em_idx in msg is greater than number of active ems')
-                return
-            if intensity < -1 or intensity > 1:
-                print('ERROR: intensity in msg is out of range [-1,1]')
-                return
-
-            in1 = self.em_pwm[em_idx][0]
-            in2 = self.em_pwm[em_idx][1]
-
-            if intensity <= 0:
-                in1.start(100)
-                in2.start(100*(1+intensity))
-            else:
-                in2.start(100);
-                in1.start(100*(1-intensity))
+            self.power_em(em_idx,intensity)
 
         elif msg.msg_type == 'run_rotation':
             print('Message is run_rotation')
 
-            em_face_init = msg.data[0]
-            rotation_dir = msg.data[1]
-            t_repel = msg.data[2]
-            t_coast = msg.data[3]
-            t_attract = msg.data[4]
+            for data in msg.data:
+                em_idx = data[0]
+                intensity = data[1]
+                duration = data[2]
+
+                self.power_em(em_idx,intensity)
+                t0 = time.time()
+
+                while time.time()-t0 < duration:
+                    pass
+
+                self.power_em(em_idx,0)
+
+    def power_em(self,em_idx,intensity):
+        '''
+        Power em_idx with given intensity
+        '''
+
+        if em_idx > len(self.em_pwm):
+            print('ERROR: em_idx in msg is greater than number of active ems')
+            return
+        if intensity < -1 or intensity > 1:
+            print('ERROR: intensity in msg is out of range [-1,1]')
+            return
+
+        in1 = self.em_pwm[em_idx][0]
+        in2 = self.em_pwm[em_idx][1]
+
+        if intensity <= 0:
+            in1.start(100)
+            in2.start(100*(1+intensity))
+        else:
+            in2.start(100);
+            in1.start(100*(1-intensity))
 
 
     def __del__(self):

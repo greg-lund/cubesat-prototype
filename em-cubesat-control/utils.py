@@ -21,12 +21,8 @@ class Msg:
             - TODO
 
         run_rotation: a message to initiate a single rotation
-            - data should be a tuple (or list): (em_face_init,rotation_dir,t_repel,t_coast,t_attract)
-                - em_face_init: int in range [0,3] corresponds to the face where repeling should begin
-                - rotation_dir: bool, 1 means clockwise, 0 means counterclockwise
-                - t_repel: float, time (in seconds) for initial repel pulse
-                - t_coast: float, time (in seconds) for coast phase
-                - t_attract: float, time (in seconds) to attract on opposite EM
+            - data should be a list of tuples, where each tuple is: (em_idx,intensity,duration)
+            - in the order of the list, power on em_idx with intensity for duration seconds, then go to next
 
         run_full_test: a message to initiate a full scale test
             - TODO
