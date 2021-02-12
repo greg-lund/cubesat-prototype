@@ -1,4 +1,4 @@
-import socket,select,pickle,os,time
+import socket,select,pickle,os,time,sys
 from utils import *
 import RPi.GPIO as GPIO
 import board,busio,adafruit_vl6180x
@@ -30,7 +30,10 @@ class CubeSatClient:
 
         # Setup sensors
         self.sensor_shutdown_pins = [4,17,27,22]
+        self.sensors = []
         self.connect_sensors()
+
+        print('Connected to %d sensors!'%len(self.sensors))
 
     def setup_ems(self):
         '''
@@ -57,8 +60,6 @@ class CubeSatClient:
         '''
         # Initialize i2c interface
         self.i2c = busio.I2C(board.SCL,board.SDA)
-        # Store sensor instances
-        self.sensors = []
 
         # Disable all sensors
         for pin in self.sensor_shutdown_pins:
@@ -136,36 +137,54 @@ class CubeSatClient:
 
 
     def act_msg(self,msg):
+        '''
+        Act on incoming message from master
+        '''
+
         if msg is None:
             print("Message is None!")
             return
+
         if msg.msg_type == 'echo':
             print('Message is echo, echoing back to master...')
             self.sckt.sendall(msg.data.encode())
+
         elif msg.msg_type == 'gpio_pwm':
             pin = msg.data[0]
             intensity = msg.data[1]
             print('Message is gpio_pwm. Starting pwm on gpio %d at %f%% intensity.'%(pin,100*intensity))
+
         elif msg.msg_type == 'power_em':
             print('Message is power_em')
+
             em_idx = msg.data[0]
             intensity = msg.data[1]
+
             if em_idx > len(self.em_pwm):
                 print('ERROR: em_idx in msg is greater than number of active ems')
                 return
             if intensity < -1 or intensity > 1:
                 print('ERROR: intensity in msg is out of range [-1,1]')
                 return
+
             in1 = self.em_pwm[em_idx][0]
             in2 = self.em_pwm[em_idx][1]
+
             if intensity <= 0:
                 in1.start(100)
                 in2.start(100*(1+intensity))
             else:
                 in2.start(100);
                 in1.start(100*(1-intensity))
+
         elif msg.msg_type == 'run_rotation':
             print('Message is run_rotation')
+
+            em_face_init = msg.data[0]
+            rotation_dir = msg.data[1]
+            t_repel = msg.data[2]
+            t_coast = msg.data[3]
+            t_attract = msg.data[4]
 
 
     def __del__(self):
