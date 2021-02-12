@@ -4,7 +4,7 @@ import RPi.GPIO as GPIO
 import board,busio,adafruit_vl6180x
 
 class CubeSatClient:
-    def __init__(self,master_hostname,port=10000,pwm_frequency=500,debug=True):
+    def __init__(self,master_hostname,port=10000,pwm_frequency=1000,debug=True):
         '''
         CubesatClient allows for communication with the master control and for actuation on the rpi zero
 
@@ -75,6 +75,11 @@ class CubeSatClient:
                 s._write_8(0x0212,addr)
                 del s
                 self.sensors.append(adafruit_vl6180x.VL6180X(self.i2c,addr))
+                # Change some registers to get higher sample rate
+                self.sensors[-1]._write_8(0x01B, 0x00) # SYSRANGE_INTRAMEASUREMENT_PERIOD = 10ms
+                self.sensors[-1]._write_8(0x01C, 0x05) # SYSRANGE_MAX_CONVERGENCE_TIME = 5ms
+                self.sensors[-1]._write_8(0x10A, 0x18) # READOUT_AVERAGE_SAMPLE_PERIOD = 2.65ms
+
                 addr+=1
 
     def test_gpio(self):
@@ -162,9 +167,33 @@ class CubeSatClient:
 
             self.power_em(em_idx,intensity)
 
+        elif msg.msg_type == 'read_sensor':
+            print('Message is read sensor')
+
+            # If no msg data included, just send one sensor reading
+            if msg.data is None or len(msg.data) == 0:
+                reading = self.get_sensor_reading()
+                reading.insert(0,0) # Set time to zero
+                self.sckt.sendall(pickle.dumps(reading))
+            else:
+                num_samples = msg.data[0]
+                dt = 1.0/msg.data[1]
+                t0 = time.time()
+                for _ in range(num_samples):
+                    s = time.time()
+                    t = s - t0
+                    reading = self.get_sensor_reading()
+                    reading.insert(0,t)
+                    self.sckt.sendall(pickle.dumps(reading))
+                    leftover = dt - (time.time()-s)
+                    if leftover > 0:
+                        time.sleep(leftover)
+
         elif msg.msg_type == 'run_rotation':
             print('Message is run_rotation')
 
+            sensor_data = []
+            t_start = time.time()
             for data in msg.data:
                 em_idx = data[0]
                 intensity = data[1]
@@ -172,11 +201,26 @@ class CubeSatClient:
 
                 self.power_em(em_idx,intensity)
                 t0 = time.time()
+                t = 0
 
-                while time.time()-t0 < duration:
-                    pass
+                while t < duration:
+                    reading = self.get_sensor_reading()
+                    reading.insert(0,time.time()-t_start)
+                    sensor_data.append(reading)
+                    self.sckt.sendall(pickle.dumps(reading))
+                    t = time.time()-t0
 
                 self.power_em(em_idx,0)
+            print('Got %d sensor measurements during rotation'%len(sensor_data))
+
+    def get_sensor_reading(self):
+        '''
+        Return a list with each sensor reading
+        '''
+        reading = []
+        for s in self.sensors:
+            reading.append(s.range)
+        return reading
 
     def power_em(self,em_idx,intensity):
         '''
@@ -206,6 +250,9 @@ class CubeSatClient:
         GPIO.cleanup()
 
 if __name__ == '__main__':
-    c = CubeSatClient(master_hostname='192.168.0.13')
+    if len(sys.argv) != 2:
+        print('Usage: %s <master_hostname>'%sys.argv[0])
+        quit()
+    c = CubeSatClient(master_hostname=sys.argv[1])
     c.connect_to_master()
     c.run()
