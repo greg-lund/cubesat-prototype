@@ -66,13 +66,16 @@ class Master:
                     msg = pickle.loads(msg)
                     print('Recieved data:',msg)
 
-    def run_2_cube_test(self,t_repel,t_coast,t_attract,recv_buffer=0.25):
+    def run_2_cube_test(self,t_repel,t_coast,t_attract,save_path=None,recv_buffer=0.25):
         total_time = t_repel+t_coast+t_attract
+        data0 = []
         data1 = []
         self.send_msg(0,Msg('run_rotation',[(0,1,t_repel),(0,0,t_coast),(1,1,t_attract)]))
+        self.send_msg(1,Msg('run_rotation',[(0,1,t_repel),(0,0,t_coast),(1,-1,t_attract)]))
         t0 = time.time()
         t = 0
         while t < total_time + recv_buffer:
+
             try:
                 msg = self.units[0].conn.recv(1024)
             except BlockingIOError:
@@ -82,10 +85,30 @@ class Master:
                     print('Client has shut down unexpectedly!')
                     return
                 else:
+                    data0.append(pickle.loads(msg))
+
+            try:
+                msg = self.units[1].conn.recv(1024)
+            except BlockingIOError:
+                pass
+            else:
+                if len(msg) == 0:
+                    print('Client has shut down unexpectedly!')
+                    return
+                else:
                     data1.append(pickle.loads(msg))
+
             t = time.time() - t0
 
-        return data1
+        if save_path is None:
+            return data1
+        else:
+            i = 1
+            while os.path.exists(save_path):
+                (filename,extension) = os.path.splittext(save_path)
+                save_path = '%s-%d.%s'%(filename,i,extension)
+                i += 1
+            
 
     def __del__(self):
         for u in self.units:
