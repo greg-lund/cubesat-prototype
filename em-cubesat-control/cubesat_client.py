@@ -25,7 +25,7 @@ class CubeSatClient:
         self.pwm_frequency = pwm_frequency
 
         # Setup em GPIO
-        self.em_pins = [(26,19),(13,6)]
+        self.em_pins = [(5,16),(20,6)]
         self.setup_ems()
 
         # Setup sensors
@@ -192,26 +192,33 @@ class CubeSatClient:
         elif msg.msg_type == 'run_rotation':
             print('Message is run_rotation')
 
-            sensor_data = []
+            samples = 0
             t_start = time.time()
             for data in msg.data:
                 em_idx = data[0]
                 intensity = data[1]
                 duration = data[2]
 
+                sensor_data = [255 for _ in range(len(self.sensors)+1)]
+                t = 0
                 self.power_em(em_idx,intensity)
                 t0 = time.time()
-                t = 0
 
+                self.start_continuous_sampling(em_idx)
                 while t < duration:
-                    reading = self.get_sensor_reading()
-                    reading.insert(0,time.time()-t_start)
-                    sensor_data.append(reading)
-                    self.sckt.sendall(pickle.dumps(reading))
+                    # Get sensor reading from face we're powering
+                    d = self.get_continuous_sample(em_idx)
+                    sensor_data[em_idx+1] = d
+                    sensor_data[0] = t
+                    self.sckt.sendall(pickle.dumps(sensor_data))
+                    samples += 1
                     t = time.time()-t0
 
                 self.power_em(em_idx,0)
-            print('Got %d sensor measurements during rotation'%len(sensor_data))
+                self.end_continuous_sampling(em_idx)
+
+            print('Got %d sensor measurements during rotation'%samples)
+
 
     def get_sensor_reading(self):
         '''
@@ -244,6 +251,59 @@ class CubeSatClient:
             in2.start(100);
             in1.start(100*(1-intensity))
 
+
+    def start_continuous_sampling(self,sensor_idx):
+        '''
+        Start continuous sampling on a single tof sensor
+        '''
+        self.sensors[sensor_idx]._write_8(0x18,0x03)
+
+    def end_continuous_sampling(self,sensor_idx):
+        '''
+        End continuous sampling on a single tof sensor
+        '''
+        self.sensors[sensor_idx]._write_8(0x018,0x01)
+        
+    def get_continuous_sample(self,sensor_idx):
+        '''
+        Get a single sample from a single tof sensor
+        '''
+        status = self.sensors[sensor_idx]._read_8(0x04f) & 0x07
+        while status != 0x04:
+            status = self.sensors[sensor_idx]._read_8(0x04f) & 0x07
+        r = self.sensors[sensor_idx]._read_8(0x062)
+        self.sensors[sensor_idx]._write_8(0x015,0x07)
+        return r
+
+    def continuous_rate_test(self,sensor_idx=0,N=100):
+        '''
+        Check the rate of continuous sensor reading on tof sensor
+        '''
+        s = self.sensors[sensor_idx]
+
+        s._write_8(0x018,0x03) # Start range measurements
+        t0 = time.time()
+        for _ in range(N):
+            status = s._read_8(0x04f) & 0x07 # Poll for new sample
+            while status != 0x04:
+                status = s._read_8(0x04f) & 0x07
+
+            r = s._read_8(0x062) # Read range sample
+            s._write_8(0x015,0x07) # Clear interrupt
+        t1 = time.time()
+        s._write_8(0x18,0x01) # Stop ranging
+        return 1.0*N / (t1-t0)
+    
+    def single_shot_rate_test(self,sensor_idx=0,N=100):
+        '''
+        Check the rate of single-shot sensor reading on tof sensor
+        '''
+        s = self.sensors[0]
+        t0 = time.time()
+        for _ in range(N):
+            r = s.range
+        t1 = time.time()
+        return 1.0*N / (t1-t0)
 
     def __del__(self):
         self.sckt.close()
