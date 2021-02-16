@@ -25,7 +25,7 @@ class CubeSatClient:
         self.pwm_frequency = pwm_frequency
 
         # Setup em GPIO
-        self.em_pins = [(5,16),(20,6)]
+        self.em_pins = [(26,19),(13,6)]
         self.setup_ems()
 
         # Setup sensors
@@ -194,17 +194,18 @@ class CubeSatClient:
 
             samples = 0
             t_start = time.time()
+            t = 0
+            t0 = time.time()
             for data in msg.data:
                 em_idx = data[0]
                 intensity = data[1]
                 duration = data[2]
 
                 sensor_data = [255 for _ in range(len(self.sensors)+1)]
-                t = 0
                 self.power_em(em_idx,intensity)
-                t0 = time.time()
 
                 self.start_continuous_sampling(em_idx)
+                t = time.time()-t0
                 while t < duration:
                     # Get sensor reading from face we're powering
                     d = self.get_continuous_sample(em_idx)

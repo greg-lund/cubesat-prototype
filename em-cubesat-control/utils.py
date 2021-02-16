@@ -17,8 +17,10 @@ class Msg:
             - data should be a tuple (or list): (em_id,intensity)
                 - em_id int in range [0,3], intensity float in range [-1,1]
         
-        read_sensor: a message to send sensor reading back to master
-            - TODO
+        read_sensors: a message to send sensor reading back to master
+            - data should be a tuple: (num_samples,sample_rate)
+                - client should send messages at sample_rate (hz) until it has sent num_samples
+                - format of messages will be [t,range_1,...,range_n]
 
         run_rotation: a message to initiate a single rotation
             - data should be a list of tuples, where each tuple is: (em_idx,intensity,duration)
