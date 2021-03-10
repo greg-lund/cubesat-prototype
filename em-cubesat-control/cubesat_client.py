@@ -1,10 +1,9 @@
 import socket,select,pickle,os,time,sys
 from utils import *
 import RPi.GPIO as GPIO
-import board,busio,adafruit_vl6180x
 
 class CubeSatClient:
-    def __init__(self,master_hostname,port=10000,pwm_frequency=1000,debug=True):
+    def __init__(self,master_hostname,port=10000,pwm_frequency=1000,debug=True,use_sensors=False):
         '''
         CubesatClient allows for communication with the master control and for actuation on the rpi zero
 
@@ -25,15 +24,17 @@ class CubeSatClient:
         self.pwm_frequency = pwm_frequency
 
         # Setup em GPIO
-        self.em_pins = [(26,19),(13,6)]
+        self.em_pins = [(19,26),(6,13),(27,22),(4,17)]
         self.setup_ems()
 
         # Setup sensors
-        self.sensor_shutdown_pins = [4,17,27,22]
-        self.sensors = []
-        self.connect_sensors()
-
-        print('Connected to %d sensors!'%len(self.sensors))
+        self.use_sensors = use_sensors
+        if self.use_sensors:
+            import board,busio,adafruit_vl6180x
+            self.sensor_shutdown_pins = [4,17,27,22]
+            self.sensors = []
+            self.connect_sensors()
+            print('Connected to %d sensors!'%len(self.sensors))
 
     def setup_ems(self):
         '''
@@ -201,25 +202,25 @@ class CubeSatClient:
                 intensity = data[1]
                 duration = data[2]
 
-                sensor_data = [255 for _ in range(len(self.sensors)+1)]
-                self.power_em(em_idx,intensity)
+                if self.use_sensors:
+                    sensor_data = [255 for _ in range(len(self.sensors)+1)]
+                    self.start_continuous_sampling(em_idx)
 
-                self.start_continuous_sampling(em_idx)
+                self.power_em(em_idx,intensity)
                 t = time.time()-t0
                 while t < duration:
                     # Get sensor reading from face we're powering
-                    d = self.get_continuous_sample(em_idx)
-                    sensor_data[em_idx+1] = d
-                    sensor_data[0] = t
-                    self.sckt.sendall(pickle.dumps(sensor_data))
+                    if self.use_sensors:
+                        d = self.get_continuous_sample(em_idx)
+                        sensor_data[em_idx+1] = d
+                        sensor_data[0] = t
+                        self.sckt.sendall(pickle.dumps(sensor_data))
                     samples += 1
                     t = time.time()-t0
 
                 self.power_em(em_idx,0)
-                self.end_continuous_sampling(em_idx)
-
-            print('Got %d sensor measurements during rotation'%samples)
-
+                if self.use_sensors:
+                    self.end_continuous_sampling(em_idx)
 
     def get_sensor_reading(self):
         '''
