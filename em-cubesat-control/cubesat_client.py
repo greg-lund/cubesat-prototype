@@ -3,7 +3,7 @@ from utils import *
 import RPi.GPIO as GPIO
 
 class CubeSatClient:
-    def __init__(self,master_hostname,port=10000,pwm_frequency=1000,debug=True,use_sensors=False):
+    def __init__(self,master_hostname='gregs-macbook',port=10000,pwm_frequency=1000,debug=True,use_sensors=False):
         '''
         CubesatClient allows for communication with the master control and for actuation on the rpi zero
 
@@ -26,6 +26,10 @@ class CubeSatClient:
         # Setup em GPIO
         self.em_pins = [(19,26),(6,13),(27,22),(4,17)]
         self.setup_ems()
+
+        # Setup corner ems
+        self.corner_pins = [(14,15),(18,23),(24,25),(10,9)]
+        self.setup_corner_ems()
 
         # Setup sensors
         self.use_sensors = use_sensors
@@ -54,6 +58,36 @@ class CubeSatClient:
 
             # Create PWM instances for our output pins
             self.em_pwm.append((GPIO.PWM(pins[0],self.pwm_frequency),GPIO.PWM(pins[1],self.pwm_frequency)))
+
+    def setup_corner_ems(self):
+
+        self.corner_pwm = []
+
+        for pins in self.corner_pins:
+            GPIO.setup(pins[0],GPIO.OUT)
+            GPIO.setup(pins[1],GPIO.OUT)
+            GPIO.output(pins[0],0)
+            GPIO.output(pins[1],0)
+            self.corner_pwm.append((GPIO.PWM(pins[0],self.pwm_frequency),GPIO.PWM(pins[1],self.pwm_frequency)))
+
+    def power_corner_em(self,em_idx,intensity):
+
+        if em_idx > len(self.corner_pwm):
+            print('ERROR: em_idx in msg is greater than number of active corner ems')
+            return
+        if intensity < -1 or intensity > 1:
+            print('ERROR: intensity in msg is out of range [-1,1]')
+            return
+
+        in1 = self.corner_pwm[em_idx][0]
+        in2 = self.corner_pwm[em_idx][1]
+
+        if intensity <= 0:
+            in1.start(100)
+            in2.start(100*(1+intensity))
+        else:
+            in2.start(100);
+            in1.start(100*(1-intensity))
 
     def connect_sensors(self):
         '''
@@ -114,7 +148,7 @@ class CubeSatClient:
             except socket.error:
                 if i == connect_attempts-1:
                     print('Failed to connect after %d attempts, aborting!'%connect_attempts)
-                    quit()
+                    return False
                 print('Unable to connect to master. Retrying in %d seconds'%retry_time)
                 time.sleep(retry_time)
             else:
@@ -122,6 +156,26 @@ class CubeSatClient:
         self.sckt.sendall(self.name.encode())
         self.sckt.setblocking(False)
         print('Connected!')
+        return True
+
+    def startup(self):
+        connected = False
+        while True:
+            if not connected:
+                connected = self.connect_to_master(1,1)
+                time.sleep(1)
+                continue
+            
+            try:
+                msg = self.sckt.recv(1024)
+            except socket.error:
+                pass
+            else:
+                if len(msg) == 0:
+                    connected = False
+                    continue
+                msg = pickle.loads(msg)
+                self.act_msg(msg)
 
     def run(self):
         '''
@@ -312,9 +366,5 @@ class CubeSatClient:
         GPIO.cleanup()
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print('Usage: %s <master_hostname>'%sys.argv[0])
-        quit()
-    c = CubeSatClient(master_hostname=sys.argv[1])
-    c.connect_to_master()
-    c.run()
+    c = CubeSatClient(master_hostname='gregs-macbook',debug=False)
+    c.startup()
