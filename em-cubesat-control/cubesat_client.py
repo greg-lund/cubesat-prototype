@@ -48,6 +48,7 @@ class CubeSatClient:
         self.em_pwm = []
 
         # Use GPIO numbering scheme
+        GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
         for pins in self.em_pins:
             # Setup output pins
@@ -367,4 +368,10 @@ class CubeSatClient:
 
 if __name__ == '__main__':
     c = CubeSatClient(master_hostname='gregs-macbook',debug=False)
-    c.startup()
+    while True:
+        try:
+            c.startup()
+        except:
+            c = CubeSatClient(master_hostname='gregs-macbook',debug=False)
+            continue
+
