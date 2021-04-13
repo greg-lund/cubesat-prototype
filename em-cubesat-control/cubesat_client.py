@@ -3,7 +3,7 @@ from utils import *
 import RPi.GPIO as GPIO
 
 class CubeSatClient:
-    def __init__(self,master_hostname='gregs-macbook',port=10000,pwm_frequency=1000,debug=True,use_sensors=False):
+    def __init__(self,master_hostname='gregs-macbook',port=10000,pwm_frequency=1000,debug=True):
         '''
         CubesatClient allows for communication with the master control and for actuation on the rpi zero
 
@@ -31,14 +31,6 @@ class CubeSatClient:
         self.corner_pins = [(14,15),(18,23),(24,25),(10,9)]
         self.setup_corner_ems()
 
-        # Setup sensors
-        self.use_sensors = use_sensors
-        if self.use_sensors:
-            import board,busio,adafruit_vl6180x
-            self.sensor_shutdown_pins = [4,17,27,22]
-            self.sensors = []
-            self.connect_sensors()
-            print('Connected to %d sensors!'%len(self.sensors))
 
     def setup_ems(self):
         '''
@@ -89,34 +81,6 @@ class CubeSatClient:
         else:
             in2.start(100);
             in1.start(100*(1-intensity))
-
-    def connect_sensors(self):
-        '''
-        Attempt to connect to all available ToF sensors
-        '''
-        # Initialize i2c interface
-        self.i2c = busio.I2C(board.SCL,board.SDA)
-
-        # Disable all sensors
-        for pin in self.sensor_shutdown_pins:
-            GPIO.setup(pin,GPIO.OUT)
-            GPIO.output(pin,0)
-
-        # Enable a single sensor at a time and connect
-        addr = 20
-        for pin in self.sensor_shutdown_pins:
-            GPIO.output(pin,1)
-            if 0x29 in self.i2c.scan():
-                s = adafruit_vl6180x.VL6180X(self.i2c,0x29)
-                s._write_8(0x0212,addr)
-                del s
-                self.sensors.append(adafruit_vl6180x.VL6180X(self.i2c,addr))
-                # Change some registers to get higher sample rate
-                self.sensors[-1]._write_8(0x01B, 0x00) # SYSRANGE_INTRAMEASUREMENT_PERIOD = 10ms
-                self.sensors[-1]._write_8(0x01C, 0x05) # SYSRANGE_MAX_CONVERGENCE_TIME = 5ms
-                self.sensors[-1]._write_8(0x10A, 0x18) # READOUT_AVERAGE_SAMPLE_PERIOD = 2.65ms
-
-                addr+=1
 
     def test_gpio(self):
         '''
@@ -220,71 +184,54 @@ class CubeSatClient:
 
             em_idx = msg.data[0]
             intensity = msg.data[1]
-
             self.power_em(em_idx,intensity)
 
-        elif msg.msg_type == 'read_sensor':
-            print('Message is read sensor')
+        elif msg.msg_type == 'power_corner_em':
+            print('Message is power_corner_em')
 
-            # If no msg data included, just send one sensor reading
-            if msg.data is None or len(msg.data) == 0:
-                reading = self.get_sensor_reading()
-                reading.insert(0,0) # Set time to zero
-                self.sckt.sendall(pickle.dumps(reading))
-            else:
-                num_samples = msg.data[0]
-                dt = 1.0/msg.data[1]
-                t0 = time.time()
-                for _ in range(num_samples):
-                    s = time.time()
-                    t = s - t0
-                    reading = self.get_sensor_reading()
-                    reading.insert(0,t)
-                    self.sckt.sendall(pickle.dumps(reading))
-                    leftover = dt - (time.time()-s)
-                    if leftover > 0:
-                        time.sleep(leftover)
+            em_idx = msg.data[0]
+            intensity = msg.data[1]
+            self.power_corner_em(em_idx,intensity)
 
         elif msg.msg_type == 'run_rotation':
             print('Message is run_rotation')
 
-            samples = 0
-            t_start = time.time()
-            t = 0
             t0 = time.time()
             for data in msg.data:
                 em_idx = data[0]
                 intensity = data[1]
                 duration = data[2]
 
-                if self.use_sensors:
-                    sensor_data = [255 for _ in range(len(self.sensors)+1)]
-                    self.start_continuous_sampling(em_idx)
-
                 self.power_em(em_idx,intensity)
                 t = time.time()-t0
                 while t < duration:
-                    # Get sensor reading from face we're powering
-                    if self.use_sensors:
-                        d = self.get_continuous_sample(em_idx)
-                        sensor_data[em_idx+1] = d
-                        sensor_data[0] = t
-                        self.sckt.sendall(pickle.dumps(sensor_data))
-                    samples += 1
                     t = time.time()-t0
 
                 self.power_em(em_idx,0)
-                if self.use_sensors:
-                    self.end_continuous_sampling(em_idx)
+        
+        elif msg.msg_type == 'run_rotation_corners':
+            print('Message is run_rotation_corners')
 
-    def get_sensor_reading(self):
-        '''
-        Return a list with each sensor reading
-        '''
-        reading = []
-        for s in self.sensors:
-            reading.append(s.range)
-        return reading
+            corner_idx = msg[0][0]
+            corner_intensity = msg[0][1]
+            self.power_corner_em(corner_idx,corner_intensity)
+
+            for data in msg[1:]:
+                if len(data) != 5:
+                    print('Error! Data in msg is incorrectly formatted:',data)
+                    return
+                (em_idx,em_power,corner_idx,corner_power,duration) = data
+                t = 0
+                t0 = time.time()
+                self.power_corner_em(corner_idx,corner_power)
+                self.power_em(em_idx,em_power)
+                while t < duration:
+                    t = time.time() - t0
+                self.power_corner_em(corner_idx,0)
+                self.power_em(em_idx,0)
+
+            self.power_corner_em(corner_idx,0)
+
 
     def power_em(self,em_idx,intensity):
         '''
@@ -308,63 +255,6 @@ class CubeSatClient:
             in2.start(100);
             in1.start(100*(1-intensity))
 
-
-    def start_continuous_sampling(self,sensor_idx):
-        '''
-        Start continuous sampling on a single tof sensor
-        '''
-        self.sensors[sensor_idx]._write_8(0x18,0x03)
-
-    def end_continuous_sampling(self,sensor_idx):
-        '''
-        End continuous sampling on a single tof sensor
-        '''
-        self.sensors[sensor_idx]._write_8(0x018,0x01)
-        
-    def get_continuous_sample(self,sensor_idx):
-        '''
-        Get a single sample from a single tof sensor
-        '''
-        status = self.sensors[sensor_idx]._read_8(0x04f) & 0x07
-        while status != 0x04:
-            status = self.sensors[sensor_idx]._read_8(0x04f) & 0x07
-        r = self.sensors[sensor_idx]._read_8(0x062)
-        self.sensors[sensor_idx]._write_8(0x015,0x07)
-        return r
-
-    def continuous_rate_test(self,sensor_idx=0,N=100):
-        '''
-        Check the rate of continuous sensor reading on tof sensor
-        '''
-        s = self.sensors[sensor_idx]
-
-        s._write_8(0x018,0x03) # Start range measurements
-        t0 = time.time()
-        for _ in range(N):
-            status = s._read_8(0x04f) & 0x07 # Poll for new sample
-            while status != 0x04:
-                status = s._read_8(0x04f) & 0x07
-
-            r = s._read_8(0x062) # Read range sample
-            s._write_8(0x015,0x07) # Clear interrupt
-        t1 = time.time()
-        s._write_8(0x18,0x01) # Stop ranging
-        return 1.0*N / (t1-t0)
-    
-    def single_shot_rate_test(self,sensor_idx=0,N=100):
-        '''
-        Check the rate of single-shot sensor reading on tof sensor
-        '''
-        s = self.sensors[0]
-        t0 = time.time()
-        for _ in range(N):
-            r = s.range
-        t1 = time.time()
-        return 1.0*N / (t1-t0)
-
-    def __del__(self):
-        self.sckt.close()
-        GPIO.cleanup()
 
 if __name__ == '__main__':
     c = CubeSatClient(master_hostname='gregs-macbook',debug=False)
