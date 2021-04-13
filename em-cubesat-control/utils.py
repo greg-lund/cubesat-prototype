@@ -29,7 +29,7 @@ class Msg:
         run_full_test: a message to initiate a full scale test
             - TODO
         '''
-        msg_types = ['echo','gpio_pwm','power_em','read_sensor','run_rotation','run_full_test']
+        msg_types = ['echo','gpio_pwm','power_em','power_corner_em','run_rotation','run_full_test','run_rotation_corners']
         if msg_type not in msg_types:
             raise Exception("Undefined msg_type. Must be one of: %s"%msg_types)
 
