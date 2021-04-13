@@ -212,11 +212,12 @@ class CubeSatClient:
         elif msg.msg_type == 'run_rotation_corners':
             print('Message is run_rotation_corners')
 
-            corner_idx = msg[0][0]
-            corner_intensity = msg[0][1]
-            self.power_corner_em(corner_idx,corner_intensity)
+            center_corner_idx = msg.data[0][0]
+            center_corner_intensity = msg.data[0][1]
+            self.power_corner_em(center_corner_idx,center_corner_intensity)
+            time.sleep(0.5) #Allow corners to make contact before rest of rotation
 
-            for data in msg[1:]:
+            for data in msg.data[1:]:
                 if len(data) != 5:
                     print('Error! Data in msg is incorrectly formatted:',data)
                     return
@@ -230,7 +231,7 @@ class CubeSatClient:
                 self.power_corner_em(corner_idx,0)
                 self.power_em(em_idx,0)
 
-            self.power_corner_em(corner_idx,0)
+            self.power_corner_em(center_corner_idx,0)
 
 
     def power_em(self,em_idx,intensity):
@@ -257,11 +258,12 @@ class CubeSatClient:
 
 
 if __name__ == '__main__':
-    c = CubeSatClient(master_hostname='gregs-macbook',debug=False)
+    debug = True
+    c = CubeSatClient(master_hostname='gregs-macbook',debug=debug)
     while True:
         try:
             c.startup()
         except:
-            c = CubeSatClient(master_hostname='gregs-macbook',debug=False)
+            c = CubeSatClient(master_hostname='gregs-macbook',debug=debug)
             continue
 
